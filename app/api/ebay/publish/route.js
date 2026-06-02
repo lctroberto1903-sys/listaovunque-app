@@ -132,7 +132,7 @@ export async function POST(request) {
       <ShippingType>Flat</ShippingType>
       <ShippingServiceOptions>
         <ShippingServicePriority>1</ShippingServicePriority>
-        <ShippingService>IT_RegularMail</ShippingService>
+        <ShippingService>__SHIPPING_CODE__</ShippingService>
         <ShippingServiceCost currencyID="EUR">5.0</ShippingServiceCost>
       </ShippingServiceOptions>
     </ShippingDetails>
@@ -147,40 +147,55 @@ export async function POST(request) {
   </Item>
 </AddItemRequest>`;
 
-  const tradingRes = await fetch("https://api.ebay.com/ws/api.dll", {
-    method: "POST",
-    headers: {
-      "X-EBAY-API-CALL-NAME": "AddItem",
-      "X-EBAY-API-SITEID": "101",
-      "X-EBAY-API-COMPATIBILITY-LEVEL": "967",
-      "X-EBAY-API-IAF-TOKEN": token,
-      "Content-Type": "text/xml",
-    },
-    body: xml,
-  });
+  const IT_SHIPPING_CODES = [
+    "IT_Courier",
+    "IT_Posta1",
+    "IT_PosteDeliveryExpressEbay",
+    "IT_BartolinieBRTExpress",
+    "IT_GLS",
+    "IT_TNT_Express",
+    "IT_DhlExpress",
+    "IT_StandardShippingFromGC",
+    "IT_StandardDeliveryFromOutsideIT",
+    "IT_RegularMail",
+  ];
 
-  const responseText = await tradingRes.text();
-
-  // Cerca ItemID con regex flessibile (gestisce namespace e whitespace)
-  const itemIdMatch = responseText.match(/ItemID[^>]*>\s*(\d+)\s*</);
-  if (itemIdMatch) {
-    return NextResponse.json({
-      success: true,
-      listingId: itemIdMatch[1],
-      url: `https://www.ebay.it/itm/${itemIdMatch[1]}`,
+  async function tryAddItem(shippingCode) {
+    const body = xml.replace("__SHIPPING_CODE__", shippingCode);
+    const res = await fetch("https://api.ebay.com/ws/api.dll", {
+      method: "POST",
+      headers: {
+        "X-EBAY-API-CALL-NAME": "AddItem",
+        "X-EBAY-API-SITEID": "101",
+        "X-EBAY-API-COMPATIBILITY-LEVEL": "967",
+        "X-EBAY-API-IAF-TOKEN": token,
+        "Content-Type": "text/xml",
+      },
+      body,
     });
+    return res.text();
   }
 
-  // Controlla se è solo un warning (Ack=Warning ma nessun ItemID = fallito comunque)
-  const ackMatch = responseText.match(/Ack[^>]*>\s*(.*?)\s*</);
-  const ack = ackMatch?.[1] || "Unknown";
+  for (const code of IT_SHIPPING_CODES) {
+    const responseText = await tryAddItem(code);
+    const itemIdMatch = responseText.match(/ItemID[^>]*>\s*(\d+)\s*</);
+    if (itemIdMatch) {
+      return NextResponse.json({
+        success: true,
+        listingId: itemIdMatch[1],
+        url: `https://www.ebay.it/itm/${itemIdMatch[1]}`,
+      });
+    }
+    // Se il codice non è disponibile prova il prossimo, altrimenti esci
+    const ackMatch = responseText.match(/Ack[^>]*>\s*(.*?)\s*</);
+    const ack = ackMatch?.[1] || "";
+    const longMsg = responseText.match(/LongMessage[^>]*>([\s\S]*?)<\/LongMessage>/)?.[1] || "";
+    const isShippingError = longMsg.toLowerCase().includes("spedizione") || longMsg.toLowerCase().includes("shipping");
+    if (ack === "Failure" && !isShippingError) {
+      // Errore non legato alla spedizione — inutile riprovare
+      return NextResponse.json({ success: false, error: `[${ack}] ${longMsg}` });
+    }
+  }
 
-  const longMessages = [...responseText.matchAll(/LongMessage[^>]*>([\s\S]*?)<\/LongMessage>/g)]
-    .map((m) => m[1].trim())
-    .join(" | ");
-
-  return NextResponse.json({
-    success: false,
-    error: `[${ack}] ${longMessages || responseText.substring(0, 400)}`,
-  });
+  return NextResponse.json({ success: false, error: "Nessun servizio di spedizione disponibile per questo account eBay." });
 }
