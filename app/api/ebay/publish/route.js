@@ -30,9 +30,9 @@ async function getToken() {
   const refresh = cookieStore.get("ebay_refresh")?.value;
   if (!refresh) return null;
 
-  const clientId = process.env.EBAY_CLIENT_ID;
-  const clientSecret = process.env.EBAY_CLIENT_SECRET;
-  const credentials = Buffer.from(`${clientId}:${clientSecret}`).toString("base64");
+  const credentials = Buffer.from(
+    `${process.env.EBAY_CLIENT_ID}:${process.env.EBAY_CLIENT_SECRET}`
+  ).toString("base64");
 
   const res = await fetch(`${EBAY_API}/identity/v1/oauth2/token`, {
     method: "POST",
@@ -45,9 +45,43 @@ async function getToken() {
       refresh_token: refresh,
     }),
   });
-
   const data = await res.json();
   return data.access_token || null;
+}
+
+async function fetchFirstPolicy(token, type) {
+  const res = await fetch(`${EBAY_API}/sell/account/v1/${type}_policy?marketplace_id=EBAY_IT`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  const data = await res.json();
+  const key = `${type}Policies`;
+  return data[key]?.[0]?.[`${type}PolicyId`] || null;
+}
+
+async function ensureMerchantLocation(token) {
+  const listRes = await fetch(`${EBAY_API}/sell/inventory/v1/location`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  const listData = await listRes.json();
+  if (listData.locations?.length > 0) {
+    return listData.locations[0].merchantLocationKey;
+  }
+
+  await fetch(`${EBAY_API}/sell/inventory/v1/location/default`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+      "Content-Language": "it-IT",
+    },
+    body: JSON.stringify({
+      location: { address: { country: "IT" } },
+      locationTypes: ["WAREHOUSE"],
+      name: "Sede principale",
+      merchantLocationStatus: "ENABLED",
+    }),
+  });
+  return "default";
 }
 
 export async function POST(request) {
@@ -63,8 +97,24 @@ export async function POST(request) {
   const listing = JSON.parse(formData.get("listing"));
   const photoFiles = formData.getAll("photos");
 
+  // Recupera policies e location automaticamente
+  const [fulfillmentId, paymentId, returnId, locationKey] = await Promise.all([
+    fetchFirstPolicy(token, "fulfillment"),
+    fetchFirstPolicy(token, "payment"),
+    fetchFirstPolicy(token, "return"),
+    ensureMerchantLocation(token),
+  ]);
+
+  if (!fulfillmentId || !paymentId || !returnId) {
+    return NextResponse.json({
+      success: false,
+      error: "Il tuo account eBay non ha le business policies configurate. Vai su ebay.it → Account → Business policies e crea una policy di spedizione, pagamento e resi.",
+    });
+  }
+
   const sku = `LO-${Date.now()}`;
 
+  // Upload foto
   const photoUrls = [];
   for (const file of photoFiles.slice(0, 8)) {
     try {
@@ -83,6 +133,7 @@ export async function POST(request) {
     } catch {}
   }
 
+  // Crea inventory item
   const inventoryRes = await fetch(`${EBAY_API}/sell/inventory/v1/inventory_item/${sku}`, {
     method: "PUT",
     headers: {
@@ -91,15 +142,13 @@ export async function POST(request) {
       "Content-Language": "it-IT",
     },
     body: JSON.stringify({
-      availability: {
-        shipToLocationAvailability: { quantity: 1 },
-      },
+      availability: { shipToLocationAvailability: { quantity: 1 } },
       condition: CONDITION_MAP[listing.condition] || "GOOD",
       product: {
         title: listing.title,
         description: listing.description || listing.title,
         brand: listing.brand || "Unbranded",
-        imageUrls: photoUrls.length ? photoUrls : ["https://via.placeholder.com/400"],
+        imageUrls: photoUrls.length ? photoUrls : [],
         aspects: {
           Taglia: [listing.size || "M"],
           ...(listing.brand ? { Marca: [listing.brand] } : {}),
@@ -110,9 +159,10 @@ export async function POST(request) {
 
   if (!inventoryRes.ok && inventoryRes.status !== 204) {
     const err = await inventoryRes.text();
-    return NextResponse.json({ success: false, error: `Inventory error: ${err.substring(0, 200)}` });
+    return NextResponse.json({ success: false, error: `Inventory error: ${err.substring(0, 300)}` });
   }
 
+  // Crea offerta
   const offerRes = await fetch(`${EBAY_API}/sell/inventory/v1/offer`, {
     method: "POST",
     headers: {
@@ -130,34 +180,42 @@ export async function POST(request) {
       categoryId: CATEGORY_MAP[listing.category] || "15724",
       listingDescription: listing.description || listing.title,
       listingPolicies: {
-        fulfillmentPolicyId: process.env.EBAY_FULFILLMENT_POLICY_ID || "",
-        paymentPolicyId: process.env.EBAY_PAYMENT_POLICY_ID || "",
-        returnPolicyId: process.env.EBAY_RETURN_POLICY_ID || "",
+        fulfillmentPolicyId: fulfillmentId,
+        paymentPolicyId: paymentId,
+        returnPolicyId: returnId,
       },
-      merchantLocationKey: process.env.EBAY_MERCHANT_LOCATION || "default",
+      merchantLocationKey: locationKey,
     }),
   });
 
   const offerData = await offerRes.json();
   if (!offerData.offerId) {
-    return NextResponse.json({ success: false, error: `Offer error: ${JSON.stringify(offerData).substring(0, 200)}` });
+    return NextResponse.json({
+      success: false,
+      error: `Offer error: ${JSON.stringify(offerData).substring(0, 300)}`,
+    });
   }
 
-  const publishRes = await fetch(`${EBAY_API}/sell/inventory/v1/offer/${offerData.offerId}/publish`, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-  });
+  // Pubblica offerta
+  const publishRes = await fetch(
+    `${EBAY_API}/sell/inventory/v1/offer/${offerData.offerId}/publish`,
+    {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    }
+  );
 
   const publishData = await publishRes.json();
-  const listingId = publishData.listingId;
-
-  if (!listingId) {
-    return NextResponse.json({ success: false, error: `Publish error: ${JSON.stringify(publishData).substring(0, 200)}` });
+  if (!publishData.listingId) {
+    return NextResponse.json({
+      success: false,
+      error: `Publish error: ${JSON.stringify(publishData).substring(0, 300)}`,
+    });
   }
 
   return NextResponse.json({
     success: true,
-    listingId,
-    url: `https://www.ebay.it/itm/${listingId}`,
+    listingId: publishData.listingId,
+    url: `https://www.ebay.it/itm/${publishData.listingId}`,
   });
 }
