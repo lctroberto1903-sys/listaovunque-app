@@ -138,6 +138,7 @@ export async function POST(request) {
         Authorization: `Bearer ${token}`,
         "Content-Type": "application/json",
         "Accept-Language": "en-US",
+        "Content-Language": "en-US",
       },
       body: JSON.stringify({
         availability: { shipToLocationAvailability: { quantity: 1 } },
@@ -168,6 +169,7 @@ export async function POST(request) {
       Authorization: `Bearer ${token}`,
       "Content-Type": "application/json",
       "Accept-Language": "en-US",
+      "Content-Language": "en-US",
     },
     body: JSON.stringify({
       sku,
