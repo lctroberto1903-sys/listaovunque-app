@@ -138,7 +138,6 @@ export async function POST(request) {
     </ShippingDetails>
     <ReturnPolicy>
       <ReturnsAcceptedOption>ReturnsAccepted</ReturnsAcceptedOption>
-      <RefundOption>MoneyBack</RefundOption>
       <ReturnsWithinOption>Days_30</ReturnsWithinOption>
       <ShippingCostPaidByOption>Seller</ShippingCostPaidByOption>
     </ReturnPolicy>
@@ -162,7 +161,8 @@ export async function POST(request) {
 
   const responseText = await tradingRes.text();
 
-  const itemIdMatch = responseText.match(/<ItemID>(\d+)<\/ItemID>/);
+  // Cerca ItemID con regex flessibile (gestisce namespace e whitespace)
+  const itemIdMatch = responseText.match(/ItemID[^>]*>\s*(\d+)\s*</);
   if (itemIdMatch) {
     return NextResponse.json({
       success: true,
@@ -171,7 +171,16 @@ export async function POST(request) {
     });
   }
 
-  const errorMatch = responseText.match(/<LongMessage>(.*?)<\/LongMessage>/s);
-  const errorMsg = errorMatch?.[1] || responseText.substring(0, 400);
-  return NextResponse.json({ success: false, error: errorMsg });
+  // Controlla se è solo un warning (Ack=Warning ma nessun ItemID = fallito comunque)
+  const ackMatch = responseText.match(/Ack[^>]*>\s*(.*?)\s*</);
+  const ack = ackMatch?.[1] || "Unknown";
+
+  const longMessages = [...responseText.matchAll(/LongMessage[^>]*>([\s\S]*?)<\/LongMessage>/g)]
+    .map((m) => m[1].trim())
+    .join(" | ");
+
+  return NextResponse.json({
+    success: false,
+    error: `[${ack}] ${longMessages || responseText.substring(0, 400)}`,
+  });
 }
