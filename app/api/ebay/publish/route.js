@@ -6,11 +6,11 @@ const EBAY_API = process.env.EBAY_ENV !== "sandbox"
   : "https://api.sandbox.ebay.com";
 
 const CONDITION_MAP = {
-  nuovo: 1000,
-  ottimo: 2750,
-  buono: 3000,
-  discreto: 5000,
-  usato: 6000,
+  nuovo: "NEW",
+  ottimo: "LIKE_NEW",
+  buono: "VERY_GOOD",
+  discreto: "GOOD",
+  usato: "ACCEPTABLE",
 };
 
 const CATEGORY_MAP = {
@@ -22,26 +22,15 @@ const CATEGORY_MAP = {
   accessori: "14339",
 };
 
-function escapeXml(str) {
-  return String(str)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
-}
-
 async function getToken() {
   const cookieStore = cookies();
   const token = cookieStore.get("ebay_token")?.value;
   if (token) return token;
-
   const refresh = cookieStore.get("ebay_refresh")?.value;
   if (!refresh) return null;
-
   const credentials = Buffer.from(
     `${process.env.EBAY_CLIENT_ID}:${process.env.EBAY_CLIENT_SECRET}`
   ).toString("base64");
-
   const res = await fetch(`${EBAY_API}/identity/v1/oauth2/token`, {
     method: "POST",
     headers: {
@@ -54,23 +43,37 @@ async function getToken() {
   return data.access_token || null;
 }
 
-async function uploadPhoto(token, file) {
-  try {
-    const bytes = await file.arrayBuffer();
-    const res = await fetch(`${EBAY_API}/sell/media/v1_beta/image`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": file.type || "image/jpeg",
-        "Content-Language": "it-IT",
-      },
-      body: bytes,
-    });
-    const data = await res.json();
-    return data.imageUrl || null;
-  } catch {
-    return null;
-  }
+async function fetchFirstPolicy(token, type) {
+  const res = await fetch(
+    `${EBAY_API}/sell/account/v1/${type}_policy?marketplace_id=EBAY_IT`,
+    { headers: { Authorization: `Bearer ${token}` } }
+  );
+  const data = await res.json();
+  const key = `${type}Policies`;
+  return data[key]?.[0]?.[`${type}PolicyId`] || null;
+}
+
+async function ensureMerchantLocation(token) {
+  const res = await fetch(`${EBAY_API}/sell/inventory/v1/location`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  const data = await res.json();
+  if (data.locations?.length > 0) return data.locations[0].merchantLocationKey;
+  await fetch(`${EBAY_API}/sell/inventory/v1/location/default`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+      "Content-Language": "it-IT",
+    },
+    body: JSON.stringify({
+      location: { address: { country: "IT" } },
+      locationTypes: ["WAREHOUSE"],
+      name: "Sede principale",
+      merchantLocationStatus: "ENABLED",
+    }),
+  });
+  return "default";
 }
 
 export async function POST(request) {
@@ -86,116 +89,134 @@ export async function POST(request) {
   const listing = JSON.parse(formData.get("listing"));
   const photoFiles = formData.getAll("photos");
 
-  // Upload foto tramite Sell Media API
+  // Recupera policies e location
+  const [fulfillmentId, paymentId, returnId, locationKey] = await Promise.all([
+    fetchFirstPolicy(token, "fulfillment"),
+    fetchFirstPolicy(token, "payment"),
+    fetchFirstPolicy(token, "return"),
+    ensureMerchantLocation(token),
+  ]);
+
+  if (!fulfillmentId) {
+    return NextResponse.json({
+      success: false,
+      error: 'Policy di spedizione mancante. Vai su <a href="/api/ebay/setup" target="_blank">/api/ebay/setup</a> per crearla.',
+    });
+  }
+  if (!paymentId || !returnId) {
+    return NextResponse.json({
+      success: false,
+      error: `Policy mancante: ${!paymentId ? "pagamento" : "resi"}. Vai su /api/ebay/setup.`,
+    });
+  }
+
+  // Upload foto
   const photoUrls = [];
   for (const file of photoFiles.slice(0, 8)) {
-    const url = await uploadPhoto(token, file);
-    if (url) photoUrls.push(url);
-  }
-
-  const picturesXml = photoUrls.length
-    ? `<PictureDetails>${photoUrls.map((u) => `<PictureURL>${escapeXml(u)}</PictureURL>`).join("")}</PictureDetails>`
-    : "";
-
-  const brandXml = listing.brand
-    ? `<NameValueList><Name>Marca</Name><Value>${escapeXml(listing.brand)}</Value></NameValueList>`
-    : "";
-
-  // Trading API AddItem — non richiede policy pre-create
-  const xml = `<?xml version="1.0" encoding="utf-8"?>
-<AddItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
-  <RequesterCredentials>
-    <eBayAuthToken>${token}</eBayAuthToken>
-  </RequesterCredentials>
-  <Item>
-    <Title>${escapeXml(listing.title.substring(0, 80))}</Title>
-    <Description><![CDATA[${listing.description || listing.title}]]></Description>
-    <PrimaryCategory>
-      <CategoryID>${CATEGORY_MAP[listing.category] || "15724"}</CategoryID>
-    </PrimaryCategory>
-    <StartPrice>${parseFloat(listing.price).toFixed(2)}</StartPrice>
-    <Country>IT</Country>
-    <Currency>EUR</Currency>
-    <ListingDuration>Days_30</ListingDuration>
-    <ListingType>FixedPriceItem</ListingType>
-    <Quantity>1</Quantity>
-    <ConditionID>${CONDITION_MAP[listing.condition] || 3000}</ConditionID>
-    ${picturesXml}
-    <ItemSpecifics>
-      <NameValueList>
-        <Name>Taglia</Name>
-        <Value>${escapeXml(listing.size || "M")}</Value>
-      </NameValueList>
-      ${brandXml}
-    </ItemSpecifics>
-    <ShippingDetails>
-      <ShippingType>Flat</ShippingType>
-      <ShippingServiceOptions>
-        <ShippingServicePriority>1</ShippingServicePriority>
-        <ShippingService>__SHIPPING_CODE__</ShippingService>
-        <ShippingServiceCost currencyID="EUR">5.0</ShippingServiceCost>
-      </ShippingServiceOptions>
-    </ShippingDetails>
-    <ReturnPolicy>
-      <ReturnsAcceptedOption>ReturnsAccepted</ReturnsAcceptedOption>
-      <ReturnsWithinOption>Days_30</ReturnsWithinOption>
-      <ShippingCostPaidByOption>Seller</ShippingCostPaidByOption>
-    </ReturnPolicy>
-    <DispatchTimeMax>3</DispatchTimeMax>
-    <Location>Italia</Location>
-    <Site>Italy</Site>
-  </Item>
-</AddItemRequest>`;
-
-  const IT_SHIPPING_CODES = [
-    "IT_Courier",
-    "IT_Posta1",
-    "IT_PosteDeliveryExpressEbay",
-    "IT_BartolinieBRTExpress",
-    "IT_GLS",
-    "IT_TNT_Express",
-    "IT_DhlExpress",
-    "IT_StandardShippingFromGC",
-    "IT_StandardDeliveryFromOutsideIT",
-    "IT_RegularMail",
-  ];
-
-  async function tryAddItem(shippingCode) {
-    const body = xml.replace("__SHIPPING_CODE__", shippingCode);
-    const res = await fetch("https://api.ebay.com/ws/api.dll", {
-      method: "POST",
-      headers: {
-        "X-EBAY-API-CALL-NAME": "AddItem",
-        "X-EBAY-API-SITEID": "101",
-        "X-EBAY-API-COMPATIBILITY-LEVEL": "967",
-        "X-EBAY-API-IAF-TOKEN": token,
-        "Content-Type": "text/xml",
-      },
-      body,
-    });
-    return res.text();
-  }
-
-  for (const code of IT_SHIPPING_CODES) {
-    const responseText = await tryAddItem(code);
-    const itemIdMatch = responseText.match(/ItemID[^>]*>\s*(\d+)\s*</);
-    if (itemIdMatch) {
-      return NextResponse.json({
-        success: true,
-        listingId: itemIdMatch[1],
-        url: `https://www.ebay.it/itm/${itemIdMatch[1]}`,
+    try {
+      const bytes = await file.arrayBuffer();
+      const uploadRes = await fetch(`${EBAY_API}/sell/media/v1_beta/image`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": file.type || "image/jpeg",
+          "Content-Language": "it-IT",
+        },
+        body: bytes,
       });
-    }
-    // Se il codice non è disponibile prova il prossimo, altrimenti esci
-    const ackMatch = responseText.match(/Ack[^>]*>\s*(.*?)\s*</);
-    const ack = ackMatch?.[1] || "";
-    const longMsg = responseText.match(/LongMessage[^>]*>([\s\S]*?)<\/LongMessage>/)?.[1] || "";
-    const isShippingError = longMsg.toLowerCase().includes("spedizione") || longMsg.toLowerCase().includes("shipping");
-    if (ack === "Failure" && !isShippingError) {
-      // Errore non legato alla spedizione — inutile riprovare
-      return NextResponse.json({ success: false, error: `[${ack}] ${longMsg}` });
-    }
+      const uploadData = await uploadRes.json();
+      if (uploadData.imageUrl) photoUrls.push(uploadData.imageUrl);
+    } catch {}
   }
 
-  return NextResponse.json({ success: false, error: "Nessun servizio di spedizione disponibile per questo account eBay." });
+  const sku = `LO-${Date.now()}`;
+
+  // Crea inventory item
+  const inventoryRes = await fetch(
+    `${EBAY_API}/sell/inventory/v1/inventory_item/${sku}`,
+    {
+      method: "PUT",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+        "Content-Language": "it-IT",
+      },
+      body: JSON.stringify({
+        availability: { shipToLocationAvailability: { quantity: 1 } },
+        condition: CONDITION_MAP[listing.condition] || "GOOD",
+        product: {
+          title: listing.title,
+          description: listing.description || listing.title,
+          brand: listing.brand || "Unbranded",
+          imageUrls: photoUrls.length ? photoUrls : [],
+          aspects: {
+            Taglia: [listing.size || "M"],
+            ...(listing.brand ? { Marca: [listing.brand] } : {}),
+          },
+        },
+      }),
+    }
+  );
+
+  if (!inventoryRes.ok && inventoryRes.status !== 204) {
+    const err = await inventoryRes.text();
+    return NextResponse.json({ success: false, error: `Inventory error: ${err.substring(0, 300)}` });
+  }
+
+  // Crea offerta
+  const offerRes = await fetch(`${EBAY_API}/sell/inventory/v1/offer`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+      "Content-Language": "it-IT",
+    },
+    body: JSON.stringify({
+      sku,
+      marketplaceId: "EBAY_IT",
+      format: "FIXED_PRICE",
+      pricingSummary: {
+        price: { value: String(listing.price), currency: "EUR" },
+      },
+      categoryId: CATEGORY_MAP[listing.category] || "15724",
+      listingDescription: listing.description || listing.title,
+      listingPolicies: {
+        fulfillmentPolicyId: fulfillmentId,
+        paymentPolicyId: paymentId,
+        returnPolicyId: returnId,
+      },
+      merchantLocationKey: locationKey,
+    }),
+  });
+
+  const offerData = await offerRes.json();
+  if (!offerData.offerId) {
+    return NextResponse.json({
+      success: false,
+      error: `Offer error: ${JSON.stringify(offerData).substring(0, 300)}`,
+    });
+  }
+
+  // Pubblica
+  const publishRes = await fetch(
+    `${EBAY_API}/sell/inventory/v1/offer/${offerData.offerId}/publish`,
+    {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    }
+  );
+
+  const publishData = await publishRes.json();
+  if (!publishData.listingId) {
+    return NextResponse.json({
+      success: false,
+      error: `Publish error: ${JSON.stringify(publishData).substring(0, 300)}`,
+    });
+  }
+
+  return NextResponse.json({
+    success: true,
+    listingId: publishData.listingId,
+    url: `https://www.ebay.it/itm/${publishData.listingId}`,
+  });
 }

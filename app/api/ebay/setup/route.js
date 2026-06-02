@@ -58,6 +58,20 @@ export async function GET() {
   // Fulfillment policy — prova tutti i codici spedizione italiani noti
   if (!(await hasPolicy(token, "fulfillment"))) {
     const IT_CODES = [
+      "IT_Courier",
+      "IT_IoInvio",
+      "IT_Posta1",
+      "IT_PosteStandardHomeToHome",
+      "IT_BartolinieBRTExpress",
+      "IT_TNT_Express",
+      "IT_DHLExpress",
+      "IT_glsNationalBusiness",
+      "IT_BartoliniPriorityExpress",
+      "IT_StandardShippingFromGC",
+      "ITDomesticStandard",
+      "IT_PosteDeliveryExpressEbay",
+      "IT_QuickMail",
+      "IT_INTClick",
       "IT_PosteItaliane",
       "IT_BRT",
       "IT_GLS",
@@ -66,9 +80,6 @@ export async function GET() {
       "IT_DHL",
       "IT_UPS",
       "IT_Nacex",
-      "IT_StandardShipping",
-      "IT_OtherShipping",
-      "IT_Freight",
     ];
 
     let created = false;
