@@ -55,45 +55,55 @@ export async function GET() {
 
   const results = {};
 
-  // Fulfillment policy — recupera primo servizio valido per EBAY_IT
+  // Fulfillment policy — prova tutti i codici spedizione italiani noti
   if (!(await hasPolicy(token, "fulfillment"))) {
-    // Prende la lista dei servizi di spedizione validi per l'Italia
-    let serviceCode = "IT_StandardShipping";
-    try {
-      const metaRes = await fetch(
-        `${EBAY_API}/sell/metadata/v1/marketplace/EBAY_IT/shipping_service`,
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
-      const metaData = await metaRes.json();
-      const domestic = metaData.shippingServices?.find(
-        (s) => s.shippingCarrier && s.shippingType === "DOMESTIC" && s.shippingServiceCode
-      );
-      if (domestic) serviceCode = domestic.shippingServiceCode;
-    } catch {}
+    const IT_CODES = [
+      "IT_PosteItaliane",
+      "IT_BRT",
+      "IT_GLS",
+      "IT_SDAExpressCourier",
+      "IT_TNT",
+      "IT_DHL",
+      "IT_UPS",
+      "IT_Nacex",
+      "IT_StandardShipping",
+      "IT_OtherShipping",
+      "IT_Freight",
+    ];
 
-    const data = await createPolicy(token, "fulfillment", {
-      name: "Spedizione Standard IT",
-      marketplaceId: "EBAY_IT",
-      categoryTypes: [{ name: "ALL_EXCLUDING_MOTORS_VEHICLES" }],
-      handlingTime: { value: 3, unit: "DAY" },
-      shippingOptions: [
-        {
-          optionType: "DOMESTIC",
-          costType: "FLAT_RATE",
-          shippingServices: [
-            {
-              sortOrder: 1,
-              shippingServiceCode: serviceCode,
-              shippingCost: { value: "5.00", currency: "EUR" },
-              buyerResponsibleForShipping: false,
-            },
-          ],
-        },
-      ],
-    });
-    results.fulfillment = data.fulfillmentPolicyId
-      ? `✅ creata (${serviceCode})`
-      : `❌ ${JSON.stringify(data).substring(0, 150)}`;
+    let created = false;
+    let lastError = "";
+    for (const code of IT_CODES) {
+      const data = await createPolicy(token, "fulfillment", {
+        name: `Spedizione IT`,
+        marketplaceId: "EBAY_IT",
+        categoryTypes: [{ name: "ALL_EXCLUDING_MOTORS_VEHICLES" }],
+        handlingTime: { value: 3, unit: "DAY" },
+        shippingOptions: [
+          {
+            optionType: "DOMESTIC",
+            costType: "FLAT_RATE",
+            shippingServices: [
+              {
+                sortOrder: 1,
+                shippingServiceCode: code,
+                shippingCost: { value: "5.00", currency: "EUR" },
+                buyerResponsibleForShipping: false,
+              },
+            ],
+          },
+        ],
+      });
+      if (data.fulfillmentPolicyId) {
+        results.fulfillment = `✅ creata (${code})`;
+        created = true;
+        break;
+      }
+      lastError = code;
+    }
+    if (!created) {
+      results.fulfillment = `❌ Nessun codice valido trovato. Ultimo tentato: ${lastError}`;
+    }
   } else {
     results.fulfillment = "✅ già esistente";
   }
