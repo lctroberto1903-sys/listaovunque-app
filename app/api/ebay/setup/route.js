@@ -55,8 +55,22 @@ export async function GET() {
 
   const results = {};
 
-  // Fulfillment policy
+  // Fulfillment policy — recupera primo servizio valido per EBAY_IT
   if (!(await hasPolicy(token, "fulfillment"))) {
+    // Prende la lista dei servizi di spedizione validi per l'Italia
+    let serviceCode = "IT_StandardShipping";
+    try {
+      const metaRes = await fetch(
+        `${EBAY_API}/sell/metadata/v1/marketplace/EBAY_IT/shipping_service`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      const metaData = await metaRes.json();
+      const domestic = metaData.shippingServices?.find(
+        (s) => s.shippingCarrier && s.shippingType === "DOMESTIC" && s.shippingServiceCode
+      );
+      if (domestic) serviceCode = domestic.shippingServiceCode;
+    } catch {}
+
     const data = await createPolicy(token, "fulfillment", {
       name: "Spedizione Standard IT",
       marketplaceId: "EBAY_IT",
@@ -69,7 +83,7 @@ export async function GET() {
           shippingServices: [
             {
               sortOrder: 1,
-              shippingServiceCode: "IT_Nacex",
+              shippingServiceCode: serviceCode,
               shippingCost: { value: "5.00", currency: "EUR" },
               buyerResponsibleForShipping: false,
             },
@@ -77,32 +91,9 @@ export async function GET() {
         },
       ],
     });
-    // se Nacex non va, prova senza codice specifico
-    if (!data.fulfillmentPolicyId) {
-      const data2 = await createPolicy(token, "fulfillment", {
-        name: "Spedizione Altro IT",
-        marketplaceId: "EBAY_IT",
-        categoryTypes: [{ name: "ALL_EXCLUDING_MOTORS_VEHICLES" }],
-        handlingTime: { value: 3, unit: "DAY" },
-        shippingOptions: [
-          {
-            optionType: "DOMESTIC",
-            costType: "FLAT_RATE",
-            shippingServices: [
-              {
-                sortOrder: 1,
-                shippingServiceCode: "IT_EspressoItalyItaly",
-                shippingCost: { value: "5.00", currency: "EUR" },
-                buyerResponsibleForShipping: false,
-              },
-            ],
-          },
-        ],
-      });
-      results.fulfillment = data2.fulfillmentPolicyId ? "✅ creata" : `❌ ${JSON.stringify(data2).substring(0, 150)}`;
-    } else {
-      results.fulfillment = "✅ creata";
-    }
+    results.fulfillment = data.fulfillmentPolicyId
+      ? `✅ creata (${serviceCode})`
+      : `❌ ${JSON.stringify(data).substring(0, 150)}`;
   } else {
     results.fulfillment = "✅ già esistente";
   }
