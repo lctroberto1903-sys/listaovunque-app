@@ -69,7 +69,7 @@ export async function GET() {
           shippingServices: [
             {
               sortOrder: 1,
-              shippingServiceCode: "IT_StandardDelivery",
+              shippingServiceCode: "IT_Nacex",
               shippingCost: { value: "5.00", currency: "EUR" },
               buyerResponsibleForShipping: false,
             },
@@ -77,21 +77,45 @@ export async function GET() {
         },
       ],
     });
-    results.fulfillment = data.fulfillmentPolicyId ? "✅ creata" : `❌ ${JSON.stringify(data).substring(0, 100)}`;
+    // se Nacex non va, prova senza codice specifico
+    if (!data.fulfillmentPolicyId) {
+      const data2 = await createPolicy(token, "fulfillment", {
+        name: "Spedizione Altro IT",
+        marketplaceId: "EBAY_IT",
+        categoryTypes: [{ name: "ALL_EXCLUDING_MOTORS_VEHICLES" }],
+        handlingTime: { value: 3, unit: "DAY" },
+        shippingOptions: [
+          {
+            optionType: "DOMESTIC",
+            costType: "FLAT_RATE",
+            shippingServices: [
+              {
+                sortOrder: 1,
+                shippingServiceCode: "IT_EspressoItalyItaly",
+                shippingCost: { value: "5.00", currency: "EUR" },
+                buyerResponsibleForShipping: false,
+              },
+            ],
+          },
+        ],
+      });
+      results.fulfillment = data2.fulfillmentPolicyId ? "✅ creata" : `❌ ${JSON.stringify(data2).substring(0, 150)}`;
+    } else {
+      results.fulfillment = "✅ creata";
+    }
   } else {
     results.fulfillment = "✅ già esistente";
   }
 
-  // Payment policy
+  // Payment policy — eBay managed payments: nessun metodo da specificare
   if (!(await hasPolicy(token, "payment"))) {
     const data = await createPolicy(token, "payment", {
       name: "Pagamento Standard IT",
       marketplaceId: "EBAY_IT",
       categoryTypes: [{ name: "ALL_EXCLUDING_MOTORS_VEHICLES" }],
       immediatePay: true,
-      paymentMethods: [{ paymentMethodType: "PERSONAL_CHECK" }],
     });
-    results.payment = data.paymentPolicyId ? "✅ creata" : `❌ ${JSON.stringify(data).substring(0, 100)}`;
+    results.payment = data.paymentPolicyId ? "✅ creata" : `❌ ${JSON.stringify(data).substring(0, 150)}`;
   } else {
     results.payment = "✅ già esistente";
   }
