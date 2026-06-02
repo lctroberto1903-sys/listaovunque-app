@@ -132,7 +132,7 @@ export async function POST(request) {
       <ShippingType>Flat</ShippingType>
       <ShippingServiceOptions>
         <ShippingServicePriority>1</ShippingServicePriority>
-        <ShippingService>IT_Other</ShippingService>
+        <ShippingService>IT_RegularMail</ShippingService>
         <ShippingServiceCost currencyID="EUR">5.0</ShippingServiceCost>
       </ShippingServiceOptions>
     </ShippingDetails>
