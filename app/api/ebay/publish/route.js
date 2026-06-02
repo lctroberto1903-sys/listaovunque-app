@@ -7,10 +7,10 @@ const EBAY_API = process.env.EBAY_ENV !== "sandbox"
 
 const CONDITION_MAP = {
   nuovo: "NEW",
-  ottimo: "LIKE_NEW",
-  buono: "VERY_GOOD",
-  discreto: "GOOD",
-  usato: "ACCEPTABLE",
+  ottimo: "USED_EXCELLENT",
+  buono: "USED_VERY_GOOD",
+  discreto: "USED_GOOD",
+  usato: "USED_ACCEPTABLE",
 };
 
 const CATEGORY_MAP = {
