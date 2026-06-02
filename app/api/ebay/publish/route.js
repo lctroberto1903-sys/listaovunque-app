@@ -64,7 +64,6 @@ async function ensureMerchantLocation(token) {
     headers: {
       Authorization: `Bearer ${token}`,
       "Content-Type": "application/json",
-      "Content-Language": "it-IT",
     },
     body: JSON.stringify({
       location: { address: { country: "IT" } },
@@ -120,8 +119,7 @@ export async function POST(request) {
         headers: {
           Authorization: `Bearer ${token}`,
           "Content-Type": file.type || "image/jpeg",
-          "Content-Language": "it-IT",
-        },
+            },
         body: bytes,
       });
       const uploadData = await uploadRes.json();
@@ -139,8 +137,7 @@ export async function POST(request) {
       headers: {
         Authorization: `Bearer ${token}`,
         "Content-Type": "application/json",
-        "Content-Language": "it-IT",
-      },
+        },
       body: JSON.stringify({
         availability: { shipToLocationAvailability: { quantity: 1 } },
         condition: CONDITION_MAP[listing.condition] || "GOOD",
@@ -169,7 +166,6 @@ export async function POST(request) {
     headers: {
       Authorization: `Bearer ${token}`,
       "Content-Type": "application/json",
-      "Content-Language": "it-IT",
     },
     body: JSON.stringify({
       sku,
