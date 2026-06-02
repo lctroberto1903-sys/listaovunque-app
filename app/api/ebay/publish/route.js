@@ -137,10 +137,11 @@ export async function POST(request) {
       headers: {
         Authorization: `Bearer ${token}`,
         "Content-Type": "application/json",
-        },
+        "Accept-Language": "en-US",
+      },
       body: JSON.stringify({
         availability: { shipToLocationAvailability: { quantity: 1 } },
-        condition: CONDITION_MAP[listing.condition] || "GOOD",
+        condition: CONDITION_MAP[listing.condition] || "USED_GOOD",
         product: {
           title: listing.title,
           description: listing.description || listing.title,
@@ -166,6 +167,7 @@ export async function POST(request) {
     headers: {
       Authorization: `Bearer ${token}`,
       "Content-Type": "application/json",
+      "Accept-Language": "en-US",
     },
     body: JSON.stringify({
       sku,
