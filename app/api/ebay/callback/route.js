@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server";
-import { cookies } from "next/headers";
 
 export async function GET(request) {
   const { searchParams } = new URL(request.url);
@@ -39,21 +38,26 @@ export async function GET(request) {
     return NextResponse.redirect(new URL("/?ebay_error=token_failed", request.url));
   }
 
-  const cookieStore = cookies();
-  cookieStore.set("ebay_token", data.access_token, {
+  // Imposta cookie sulla response (unico modo corretto in Next.js Route Handlers)
+  const response = NextResponse.redirect(new URL("/?ebay_connected=1", request.url));
+
+  response.cookies.set("ebay_token", data.access_token, {
     httpOnly: true,
     secure: true,
-    maxAge: data.expires_in,
+    maxAge: data.expires_in || 7200,
     path: "/",
+    sameSite: "lax",
   });
+
   if (data.refresh_token) {
-    cookieStore.set("ebay_refresh", data.refresh_token, {
+    response.cookies.set("ebay_refresh", data.refresh_token, {
       httpOnly: true,
       secure: true,
       maxAge: 60 * 60 * 24 * 180,
       path: "/",
+      sameSite: "lax",
     });
   }
 
-  return NextResponse.redirect(new URL("/?ebay_connected=1", request.url));
+  return response;
 }
