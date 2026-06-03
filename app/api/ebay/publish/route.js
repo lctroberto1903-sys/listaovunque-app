@@ -76,11 +76,14 @@ async function ensureMerchantLocation(token) {
 }
 
 export async function POST(request) {
+  const cookieStore = cookies();
+  const rawToken = cookieStore.get("ebay_token")?.value;
+  const rawRefresh = cookieStore.get("ebay_refresh")?.value;
   const token = await getToken();
   if (!token) {
     return NextResponse.json({
       success: false,
-      error: "eBay non connesso. Vai su /api/ebay/auth per autorizzare.",
+      error: `eBay non connesso. [debug: token=${rawToken ? "presente" : "assente"}, refresh=${rawRefresh ? "presente" : "assente"}, cookies=${cookieStore.getAll().map(c=>c.name).join(",")}]`,
     });
   }
 
