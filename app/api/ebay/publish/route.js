@@ -148,15 +148,16 @@ export async function POST(request) {
           Authorization: `Bearer ${token}`,
           "Content-Type": file.type || "image/jpeg",
           "Accept-Language": "en-US",
-          "Content-Language": "en-US",
         },
         body: bytes,
       });
-      const uploadData = await uploadRes.json();
+      const text = await uploadRes.text();
+      let uploadData = {};
+      try { uploadData = JSON.parse(text); } catch { uploadData = { raw: text.substring(0, 200) }; }
       if (uploadData.imageUrl) {
         photoUrls.push(uploadData.imageUrl);
       } else {
-        photoErrors.push(JSON.stringify(uploadData).substring(0, 150));
+        photoErrors.push(`HTTP ${uploadRes.status}: ${JSON.stringify(uploadData).substring(0, 200)}`);
       }
     } catch (e) {
       photoErrors.push(e.message);
