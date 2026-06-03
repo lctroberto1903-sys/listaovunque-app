@@ -96,6 +96,13 @@ export async function POST(request) {
     ensureMerchantLocation(token),
   ]);
 
+  if (photoFiles.length === 0) {
+    return NextResponse.json({
+      success: false,
+      error: "eBay richiede almeno una foto. Aggiungila prima di pubblicare.",
+    });
+  }
+
   if (!fulfillmentId) {
     return NextResponse.json({
       success: false,

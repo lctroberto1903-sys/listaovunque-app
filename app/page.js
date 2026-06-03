@@ -107,6 +107,10 @@ export default function Home() {
       setStatus({ type: "error", message: "Seleziona almeno una piattaforma." });
       return;
     }
+    if (platforms.ebay && photos.length === 0) {
+      setStatus({ type: "error", message: "eBay richiede almeno una foto. Aggiungila prima di pubblicare." });
+      return;
+    }
     setLoading(true);
     setResults([]);
     setStatus(null);
