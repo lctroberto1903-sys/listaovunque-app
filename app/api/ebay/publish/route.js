@@ -136,28 +136,39 @@ export async function POST(request) {
     });
   }
 
-  // Upload foto
+  // Upload foto tramite Trading API UploadSiteHostedPictures
   const photoUrls = [];
   const photoErrors = [];
   for (const file of photoFiles.slice(0, 8)) {
     try {
+      const xml = `<?xml version="1.0" encoding="utf-8"?>
+<UploadSiteHostedPicturesRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+  <RequesterCredentials><eBayAuthToken>${token}</eBayAuthToken></RequesterCredentials>
+  <PictureSet>Standard</PictureSet>
+</UploadSiteHostedPicturesRequest>`;
+
+      const fd = new FormData();
       const bytes = await file.arrayBuffer();
-      const uploadRes = await fetch(`${EBAY_API}/sell/media/v1_beta/image`, {
+      fd.append("XML Payload", new Blob([xml], { type: "text/xml" }), "request.xml");
+      fd.append("Image1", new Blob([bytes], { type: file.type || "image/jpeg" }), "image.jpg");
+
+      const uploadRes = await fetch("https://api.ebay.com/ws/api.dll", {
         method: "POST",
         headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": file.type || "image/jpeg",
-          "Accept-Language": "en-US",
+          "X-EBAY-API-CALL-NAME": "UploadSiteHostedPictures",
+          "X-EBAY-API-SITEID": "101",
+          "X-EBAY-API-COMPATIBILITY-LEVEL": "967",
+          "X-EBAY-API-IAF-TOKEN": token,
         },
-        body: bytes,
+        body: fd,
       });
+
       const text = await uploadRes.text();
-      let uploadData = {};
-      try { uploadData = JSON.parse(text); } catch { uploadData = { raw: text.substring(0, 200) }; }
-      if (uploadData.imageUrl) {
-        photoUrls.push(uploadData.imageUrl);
+      const urlMatch = text.match(/<FullURL>(.*?)<\/FullURL>/);
+      if (urlMatch?.[1]) {
+        photoUrls.push(urlMatch[1]);
       } else {
-        photoErrors.push(`HTTP ${uploadRes.status}: ${JSON.stringify(uploadData).substring(0, 200)}`);
+        photoErrors.push(`Upload: ${text.substring(0, 200)}`);
       }
     } catch (e) {
       photoErrors.push(e.message);
