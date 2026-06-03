@@ -47,11 +47,12 @@ export default function Home() {
     const handler = () => setExtensionActive(true);
     document.addEventListener("listaovunque-extension-active", handler);
 
-    // Legge token eBay dal cookie JS e lo salva in localStorage
     const getCookie = (name) => {
       const match = document.cookie.match(new RegExp("(^| )" + name + "=([^;]+)"));
       return match ? decodeURIComponent(match[2]) : null;
     };
+
+    // Salva token da cookie JS in localStorage
     const tokenFromCookie = getCookie("ebay_token_js");
     if (tokenFromCookie) {
       localStorage.setItem("ebay_token", tokenFromCookie);
@@ -62,6 +63,17 @@ export default function Home() {
 
     const stored = localStorage.getItem("ebay_token");
     if (stored && !tokenFromCookie) setEbayToken(stored);
+
+    // Se torniamo da eBay auth (?ebay_connected=1), riprova pubblicazione salvata
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("ebay_connected") === "1") {
+      window.history.replaceState({}, "", "/");
+      const saved = sessionStorage.getItem("pending_publish");
+      if (saved) {
+        sessionStorage.removeItem("pending_publish");
+        setTimeout(() => document.getElementById("submit-btn")?.click(), 800);
+      }
+    }
 
     return () => document.removeEventListener("listaovunque-extension-active", handler);
   }, []);
@@ -110,6 +122,14 @@ export default function Home() {
   const publishEbay = async () => {
     const token = ebayToken || localStorage.getItem("ebay_token") || "";
     const refresh = localStorage.getItem("ebay_refresh") || "";
+
+    // Se non c'è token, salva lo stato e avvia auth automaticamente
+    if (!token && !refresh) {
+      sessionStorage.setItem("pending_publish", "1");
+      window.location.href = "/api/ebay/auth";
+      return { success: false, error: "Connessione eBay in corso..." };
+    }
+
     const formData = new FormData();
     formData.append("listing", JSON.stringify(listing));
     formData.append("ebay_token", token);
@@ -348,6 +368,7 @@ export default function Home() {
 
         {/* Submit */}
         <button
+          id="submit-btn"
           type="submit"
           disabled={loading}
           className="w-full bg-brand text-white font-bold py-4 rounded-2xl text-base hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
