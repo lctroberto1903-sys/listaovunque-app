@@ -118,6 +118,7 @@ export async function POST(request) {
 
   // Upload foto
   const photoUrls = [];
+  const photoErrors = [];
   for (const file of photoFiles.slice(0, 8)) {
     try {
       const bytes = await file.arrayBuffer();
@@ -126,12 +127,27 @@ export async function POST(request) {
         headers: {
           Authorization: `Bearer ${token}`,
           "Content-Type": file.type || "image/jpeg",
-            },
+          "Accept-Language": "en-US",
+          "Content-Language": "en-US",
+        },
         body: bytes,
       });
       const uploadData = await uploadRes.json();
-      if (uploadData.imageUrl) photoUrls.push(uploadData.imageUrl);
-    } catch {}
+      if (uploadData.imageUrl) {
+        photoUrls.push(uploadData.imageUrl);
+      } else {
+        photoErrors.push(JSON.stringify(uploadData).substring(0, 150));
+      }
+    } catch (e) {
+      photoErrors.push(e.message);
+    }
+  }
+
+  if (photoUrls.length === 0 && photoFiles.length > 0) {
+    return NextResponse.json({
+      success: false,
+      error: `Upload foto fallito: ${photoErrors[0] || "errore sconosciuto"}`,
+    });
   }
 
   const sku = `LO-${Date.now()}`;
