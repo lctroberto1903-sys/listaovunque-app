@@ -201,12 +201,8 @@ export async function POST(request) {
         product: {
           title: listing.title,
           description: listing.description || listing.title,
-          brand: listing.brand || "Unbranded",
-          imageUrls: photoUrls.length ? photoUrls : [],
-          aspects: {
-            Taglia: [listing.size || "M"],
-            ...(listing.brand ? { Marca: [listing.brand] } : {}),
-          },
+          imageUrls: photoUrls,
+          ...(listing.brand ? { brand: listing.brand } : {}),
         },
       }),
     }
