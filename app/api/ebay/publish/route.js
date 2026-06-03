@@ -76,20 +76,37 @@ async function ensureMerchantLocation(token) {
 }
 
 export async function POST(request) {
-  const cookieStore = cookies();
-  const rawToken = cookieStore.get("ebay_token")?.value;
-  const rawRefresh = cookieStore.get("ebay_refresh")?.value;
-  const token = await getToken();
-  if (!token) {
-    return NextResponse.json({
-      success: false,
-      error: `eBay non connesso. [debug: token=${rawToken ? "presente" : "assente"}, refresh=${rawRefresh ? "presente" : "assente"}, cookies=${cookieStore.getAll().map(c=>c.name).join(",")}]`,
-    });
-  }
-
   const formData = await request.formData();
   const listing = JSON.parse(formData.get("listing"));
   const photoFiles = formData.getAll("photos");
+
+  // Prova cookie server-side, poi fallback su token inviato dal client
+  let token = await getToken();
+  if (!token) {
+    const clientToken = formData.get("ebay_token");
+    const clientRefresh = formData.get("ebay_refresh");
+    if (clientToken) {
+      token = clientToken;
+    } else if (clientRefresh) {
+      const credentials = Buffer.from(
+        `${process.env.EBAY_CLIENT_ID}:${process.env.EBAY_CLIENT_SECRET}`
+      ).toString("base64");
+      const res = await fetch("https://api.ebay.com/identity/v1/oauth2/token", {
+        method: "POST",
+        headers: { Authorization: `Basic ${credentials}`, "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ grant_type: "refresh_token", refresh_token: clientRefresh }),
+      });
+      const data = await res.json();
+      token = data.access_token || null;
+    }
+  }
+
+  if (!token) {
+    return NextResponse.json({
+      success: false,
+      error: "eBay non connesso. Vai su /api/ebay/auth per autorizzare.",
+    });
+  }
 
   // Recupera policies e location
   const [fulfillmentId, paymentId, returnId, locationKey] = await Promise.all([

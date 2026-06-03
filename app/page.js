@@ -34,6 +34,7 @@ export default function Home() {
   const [photos, setPhotos] = useState([]);
   const [platforms, setPlatforms] = useState({ vinted: true, ebay: true });
   const [extensionActive, setExtensionActive] = useState(false);
+  const [ebayToken, setEbayToken] = useState(null);
   const [status, setStatus] = useState(null);
   const [results, setResults] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -45,6 +46,23 @@ export default function Home() {
     }
     const handler = () => setExtensionActive(true);
     document.addEventListener("listaovunque-extension-active", handler);
+
+    // Legge token eBay dal cookie JS e lo salva in localStorage
+    const getCookie = (name) => {
+      const match = document.cookie.match(new RegExp("(^| )" + name + "=([^;]+)"));
+      return match ? decodeURIComponent(match[2]) : null;
+    };
+    const tokenFromCookie = getCookie("ebay_token_js");
+    if (tokenFromCookie) {
+      localStorage.setItem("ebay_token", tokenFromCookie);
+      setEbayToken(tokenFromCookie);
+    }
+    const refreshFromCookie = getCookie("ebay_refresh_js");
+    if (refreshFromCookie) localStorage.setItem("ebay_refresh", refreshFromCookie);
+
+    const stored = localStorage.getItem("ebay_token");
+    if (stored && !tokenFromCookie) setEbayToken(stored);
+
     return () => document.removeEventListener("listaovunque-extension-active", handler);
   }, []);
 
@@ -90,10 +108,14 @@ export default function Home() {
   };
 
   const publishEbay = async () => {
+    const token = ebayToken || localStorage.getItem("ebay_token") || "";
+    const refresh = localStorage.getItem("ebay_refresh") || "";
     const formData = new FormData();
     formData.append("listing", JSON.stringify(listing));
+    formData.append("ebay_token", token);
+    formData.append("ebay_refresh", refresh);
     photos.forEach((p) => formData.append("photos", p.file));
-    const res = await fetch("/api/ebay/publish", { method: "POST", body: formData });
+    const res = await fetch("/api/ebay/publish", { method: "POST", body: formData, credentials: "include" });
     return res.json();
   };
 

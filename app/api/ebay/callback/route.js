@@ -38,24 +38,25 @@ export async function GET(request) {
     return NextResponse.redirect(new URL("/?ebay_error=token_failed", request.url));
   }
 
-  // Imposta cookie sulla response (unico modo corretto in Next.js Route Handlers)
   const response = NextResponse.redirect(new URL("/?ebay_connected=1", request.url));
 
+  // Cookie httpOnly per sicurezza server-side
   response.cookies.set("ebay_token", data.access_token, {
-    httpOnly: true,
-    secure: true,
-    maxAge: data.expires_in || 7200,
-    path: "/",
-    sameSite: "lax",
+    httpOnly: true, secure: true, maxAge: data.expires_in || 7200, path: "/", sameSite: "lax",
   });
-
   if (data.refresh_token) {
     response.cookies.set("ebay_refresh", data.refresh_token, {
-      httpOnly: true,
-      secure: true,
-      maxAge: 60 * 60 * 24 * 180,
-      path: "/",
-      sameSite: "lax",
+      httpOnly: true, secure: true, maxAge: 60 * 60 * 24 * 180, path: "/", sameSite: "lax",
+    });
+  }
+
+  // Cookie leggibile dal client JS (per fallback)
+  response.cookies.set("ebay_token_js", data.access_token, {
+    httpOnly: false, secure: true, maxAge: data.expires_in || 7200, path: "/", sameSite: "lax",
+  });
+  if (data.refresh_token) {
+    response.cookies.set("ebay_refresh_js", data.refresh_token, {
+      httpOnly: false, secure: true, maxAge: 60 * 60 * 24 * 180, path: "/", sameSite: "lax",
     });
   }
 
