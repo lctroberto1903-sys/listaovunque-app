@@ -213,34 +213,43 @@ export async function POST(request) {
     return NextResponse.json({ success: false, error: `Inventory error: ${err.substring(0, 300)}` });
   }
 
-  // Crea offerta
-  const offerRes = await fetch(`${EBAY_API}/sell/inventory/v1/offer`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-      "Accept-Language": "en-US",
-      "Content-Language": "en-US",
-    },
-    body: JSON.stringify({
-      sku,
-      marketplaceId: "EBAY_IT",
-      format: "FIXED_PRICE",
-      pricingSummary: {
-        price: { value: String(listing.price), currency: "EUR" },
-      },
-      categoryId: CATEGORY_MAP[listing.category] || "15724",
-      listingDescription: listing.description || listing.title,
-      listingPolicies: {
-        fulfillmentPolicyId: fulfillmentId,
-        paymentPolicyId: paymentId,
-        returnPolicyId: returnId,
-      },
-      merchantLocationKey: locationKey,
-    }),
-  });
+  // Attende che l'inventory item sia disponibile nel sistema eBay
+  await new Promise((r) => setTimeout(r, 3000));
 
-  const offerData = await offerRes.json();
+  // Crea offerta con retry (eBay a volte non trova subito l'item)
+  let offerData = {};
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const offerRes = await fetch(`${EBAY_API}/sell/inventory/v1/offer`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+        "Accept-Language": "en-US",
+        "Content-Language": "en-US",
+      },
+      body: JSON.stringify({
+        sku,
+        marketplaceId: "EBAY_IT",
+        format: "FIXED_PRICE",
+        pricingSummary: { price: { value: String(listing.price), currency: "EUR" } },
+        categoryId: CATEGORY_MAP[listing.category] || "15724",
+        listingDescription: listing.description || listing.title,
+        listingPolicies: {
+          fulfillmentPolicyId: fulfillmentId,
+          paymentPolicyId: paymentId,
+          returnPolicyId: returnId,
+        },
+        merchantLocationKey: locationKey,
+      }),
+    });
+    offerData = await offerRes.json();
+    if (offerData.offerId) break;
+    // Se SKU non trovato, attende prima di riprovare
+    const isSkuError = JSON.stringify(offerData).includes("25751");
+    if (!isSkuError) break;
+    await new Promise((r) => setTimeout(r, 3000));
+  }
+
   if (!offerData.offerId) {
     return NextResponse.json({
       success: false,
